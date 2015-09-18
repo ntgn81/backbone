@@ -1436,6 +1436,7 @@
   var Router = Backbone.Router = function(options) {
     options || (options = {});
     if (options.routes) this.routes = options.routes;
+    this.enableRouteData = options.enableRouteData;
     this._bindRoutes();
     this.initialize.apply(this, arguments);
   };
@@ -1446,6 +1447,8 @@
   var namedParam    = /(\(\?)?:\w+/g;
   var splatParam    = /\*\w+/g;
   var escapeRegExp  = /[\-{}\[\]+?.,\\\^$|#\s]/g;
+  // Regular expression to extract all parameter names into an array
+  var paramNamesRegExp = /[:*]\w+/g;
 
   // Set up all inheritable **Backbone.Router** properties and methods.
   _.extend(Router.prototype, Events, {
@@ -1460,8 +1463,31 @@
     //       ...
     //     });
     //
-    route: function(route, name, callback) {
-      if (!_.isRegExp(route)) route = this._routeToRegExp(route);
+    route: function(route, name, callback) {   
+      if (!_.isRegExp(route)) {
+        // store original route string so we can extract param names
+        // if the option is enabled
+        var originalRouteString = route;
+
+        route = this._routeToRegExp(route);
+
+        if (this.enableRouteData) {
+          // extract parameter names out from original route string
+          var paramNamesArr = _.map(originalRouteString.match(paramNamesRegExp), function(p) {
+            // remove : or * to get just the name
+            return p.slice(1);
+          });
+
+          // use processed routeRegExp string as key into
+          // this._routeDetails object
+          // since _extractParameters only passes the routeRegExp
+          this.__routeDetails__ = this.__routeDetails__ || {};
+          this.__routeDetails__[route.toString()] = {
+            paramNames: paramNamesArr,
+            name: name
+          };
+        }
+      }
       if (_.isFunction(name)) {
         callback = name;
         name = '';
@@ -1520,11 +1546,29 @@
     // treated as `null` to normalize cross-browser behavior.
     _extractParameters: function(route, fragment) {
       var params = route.exec(fragment).slice(1);
-      return _.map(params, function(param, i) {
+      var decodedParams = _.map(params, function(param, i) {
         // Don't decode the search params.
         if (i === params.length - 1) return param || null;
         return param ? decodeURIComponent(param) : null;
       });
+
+      if (this.enableRouteData) {
+        // get route details, which has array of param names        
+        var routeDetails = this.__routeDetails__[route.toString()];
+        if (routeDetails) {
+          var routeData = {
+            name: routeDetails.name,
+            params: _.object(routeDetails.paramNames, decodedParams),            
+          };
+          var queryString = decodedParams[decodedParams.length - 1];
+          if (queryString) {
+            routeData.queryString = queryString;
+          }
+          return [routeData];
+        }
+      }
+
+      return decodedParams;
     }
 
   });
